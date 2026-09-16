@@ -2,66 +2,13 @@ import chromium from '@sparticuz/chromium';
 import puppeteer from 'puppeteer-core';
 import webpush from 'web-push';
 import { redis } from './_redis.js';
+import { fillApplicationForm, findEarliestAvailable } from './_formFiller.js';
 
 webpush.setVapidDetails(
   `mailto:${process.env.VAPID_EMAIL || 'admin@example.com'}`,
   process.env.VAPID_PUBLIC_KEY,
   process.env.VAPID_PRIVATE_KEY
 );
-
-const MONTHS = {
-  'января': 0, 'февраля': 1, 'марта': 2, 'апреля': 3, 'мая': 4, 'июня': 5,
-  'июля': 6, 'августа': 7, 'сентября': 8, 'октября': 9, 'ноября': 10, 'декабря': 11,
-};
-
-function parseAriaDate(label) {
-  if (!label) return null;
-  const m = label.match(/(\d{1,2})\s+([а-яёА-ЯЁ]+)\s+(\d{4})/);
-  if (!m) return null;
-  const day = parseInt(m[1], 10);
-  const monthName = m[2].toLowerCase();
-  const year = parseInt(m[3], 10);
-  if (!(monthName in MONTHS)) return null;
-  return new Date(Date.UTC(year, MONTHS[monthName], day));
-}
-
-async function scanVisibleDays(page) {
-  return page.evaluate(() => {
-    const picker = document.querySelector('.fod-picker-calendar');
-    if (!picker) return [];
-    return Array.from(picker.querySelectorAll('button.fod-picker-calendar-day'))
-      .filter((b) => !b.disabled)
-      .map((b) => b.getAttribute('aria-label'))
-      .filter(Boolean);
-  });
-}
-
-async function clickNextMonth(page) {
-  return page.evaluate(() => {
-    const btn = document.querySelector('.fod-picker-nav-button-next');
-    if (btn && !btn.disabled) {
-      btn.click();
-      return true;
-    }
-    return false;
-  });
-}
-
-async function findEarliestAvailable(page, maxMonthsForward = 6) {
-  for (let i = 0; i < maxMonthsForward; i++) {
-    const labels = await scanVisibleDays(page);
-    const parsed = labels
-      .map((label) => ({ label, date: parseAriaDate(label) }))
-      .filter((d) => d.date)
-      .sort((a, b) => a.date - b.date);
-    if (parsed.length > 0) return parsed[0];
-
-    const moved = await clickNextMonth(page);
-    if (!moved) break;
-    await new Promise((r) => setTimeout(r, 900));
-  }
-  return null;
-}
 
 async function removeSubscription(profileId, endpoint) {
   const subs = (await redis.get(`subs:${profileId}`)) || [];
@@ -113,6 +60,7 @@ export default async function handler(req, res) {
       const page = await browser.newPage();
       try {
         await page.goto(profile.url, { waitUntil: 'networkidle2', timeout: 35000 });
+        await fillApplicationForm(page, profile);
         await page.waitForSelector('.fod-picker-calendar', { timeout: 15000 }).catch(() => {});
 
         const found = await findEarliestAvailable(page);
