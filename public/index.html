@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ASP Slot Finder</title>
+<link rel="manifest" href="/manifest.json" />
+<link rel="icon" href="/icon48.png" />
+<link rel="apple-touch-icon" href="/icon128.png" />
+<meta name="theme-color" content="#2e7d32" />
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, system-ui, sans-serif;
+    background: #fafafa; color: #222; margin: 0; padding: 16px;
+    max-width: 520px; margin-inline: auto;
+  }
+  h1 { font-size: 18px; margin: 8px 0 16px; }
+  .card {
+    background: #fff; border: 1px solid #e0e0e0; border-radius: 10px;
+    padding: 14px; margin-bottom: 14px;
+  }
+  label { display: block; font-size: 12px; color: #555; margin-bottom: 4px; }
+  input[type="text"], input[type="url"] {
+    width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px;
+    font-size: 14px; margin-bottom: 10px;
+  }
+  button {
+    padding: 9px 14px; border: 1px solid #999; border-radius: 6px;
+    background: #f0f0f0; cursor: pointer; font-size: 13px;
+  }
+  button.primary { background: #2e7d32; color: #fff; border: none; }
+  button.danger { background: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
+  .profile { border-bottom: 1px solid #eee; padding: 10px 0; }
+  .profile:last-child { border-bottom: none; }
+  .profile-name { font-weight: 600; font-size: 14px; }
+  .profile-url { font-size: 11px; color: #888; word-break: break-all; }
+  .best { font-size: 13px; color: #2e7d32; margin-top: 4px; }
+  .actions { margin-top: 6px; display: flex; gap: 6px; }
+  #status { font-size: 12px; color: #666; margin-bottom: 10px; }
+  .history-item { font-size: 12px; color: #555; padding: 3px 0; }
+</style>
+</head>
+<body>
+  <h1>🔎 ASP Slot Finder</h1>
+
+  <div class="card">
+    <div id="status">Проверяем разрешение на уведомления…</div>
+    <button id="enableBtn" class="primary">Включить уведомления</button>
+  </div>
+
+  <div class="card">
+    <label for="name">Название профиля</label>
+    <input type="text" id="name" placeholder="Например: apo01" />
+    <label for="url">Ссылка на форму ASP</label>
+    <input type="url" id="url" placeholder="https://eservicii.gov.md/asp/dimtcca/cerere/apo01" />
+    <button id="addBtn" class="primary">Добавить профиль</button>
+  </div>
+
+  <div class="card">
+    <div style="font-weight:600; margin-bottom:8px;">Отслеживаемые профили</div>
+    <div id="profileList">Загрузка…</div>
+  </div>
+
+<script>
+  const statusEl = document.getElementById('status');
+  const enableBtn = document.getElementById('enableBtn');
+  const profileListEl = document.getElementById('profileList');
+
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+  }
+
+  async function registerSW() {
+    if (!('serviceWorker' in navigator)) return null;
+    return navigator.serviceWorker.register('/sw.js');
+  }
+
+  async function subscribeForProfile(profileId) {
+    const reg = await navigator.serviceWorker.ready;
+    const { key } = await fetch('/api/vapid-public-key').then((r) => r.json());
+    if (!key) {
+      statusEl.textContent = 'Сервер ещё не настроен (нет VAPID-ключа).';
+      return;
+    }
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key),
+      });
+    }
+    await fetch('/api/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileId, subscription: sub }),
+    });
+  }
+
+  enableBtn.addEventListener('click', async () => {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      statusEl.textContent = 'Уведомления не разрешены.';
+      return;
+    }
+    statusEl.textContent = 'Уведомления включены. Подписка привяжется к каждому добавленному профилю.';
+    window.__notifPermGranted = true;
+  });
+
+  document.getElementById('addBtn').addEventListener('click', async () => {
+    const name = document.getElementById('name').value.trim();
+    const url = document.getElementById('url').value.trim();
+    if (!url) return;
+    const res = await fetch('/api/profiles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, url }),
+    });
+    const data = await res.json();
+    if (data.profile && window.__notifPermGranted) {
+      await subscribeForProfile(data.profile.id);
+    }
+    document.getElementById('name').value = '';
+    document.getElementById('url').value = '';
+    loadProfiles();
+  });
+
+  async function deleteProfile(id) {
+    await fetch('/api/profiles', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    loadProfiles();
+  }
+
+  async function loadProfiles() {
+    const { profiles } = await fetch('/api/profiles').then((r) => r.json());
+    if (profiles.length === 0) {
+      profileListEl.innerHTML = '<div style="color:#888;font-size:13px;">Пока нет профилей</div>';
+      return;
+    }
+    profileListEl.innerHTML = '';
+    for (const p of profiles) {
+      const div = document.createElement('div');
+      div.className = 'profile';
+      div.innerHTML = `
+        <div class="profile-name">${p.name}</div>
+        <div class="profile-url">${p.url}</div>
+        <div class="best">${p.bestLabel ? '✅ Лучшая найденная дата: ' + p.bestLabel : 'Ещё не найдено'}</div>
+        <div class="actions">
+          <button class="subBtn">🔔 Подписаться на этот профиль</button>
+          <button class="danger delBtn">Удалить</button>
+        </div>
+        <div class="historyBox"></div>
+      `;
+      div.querySelector('.subBtn').addEventListener('click', () => subscribeForProfile(p.id));
+      div.querySelector('.delBtn').addEventListener('click', () => deleteProfile(p.id));
+      profileListEl.appendChild(div);
+
+      fetch(`/api/history?profileId=${p.id}`)
+        .then((r) => r.json())
+        .then(({ entries }) => {
+          const box = div.querySelector('.historyBox');
+          if (!entries || entries.length === 0) return;
+          box.innerHTML = entries
+            .slice(0, 5)
+            .map((e) => `<div class="history-item">${new Date(e.foundAt).toLocaleString('ru-RU')} — ${e.label}</div>`)
+            .join('');
+        });
+    }
+  }
+
+  (async function init() {
+    await registerSW();
+    if (Notification.permission === 'granted') {
+      statusEl.textContent = 'Уведомления уже включены.';
+      window.__notifPermGranted = true;
+      enableBtn.style.display = 'none';
+    } else if (Notification.permission === 'denied') {
+      statusEl.textContent = 'Уведомления заблокированы в настройках браузера.';
+      enableBtn.style.display = 'none';
+    } else {
+      statusEl.textContent = 'Нажмите, чтобы разрешить уведомления.';
+    }
+    loadProfiles();
+  })();
+</script>
+</body>
+</html>
