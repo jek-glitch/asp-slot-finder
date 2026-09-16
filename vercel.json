@@ -3,6 +3,10 @@
     "api/check.js": {
       "maxDuration": 60,
       "memory": 1024
+    },
+    "api/debug-check.js": {
+      "maxDuration": 60,
+      "memory": 1024
     }
   }
 }
