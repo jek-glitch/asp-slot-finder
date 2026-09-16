@@ -16,12 +16,13 @@
     max-width: 520px; margin-inline: auto;
   }
   h1 { font-size: 18px; margin: 8px 0 16px; }
+  h3 { font-size: 13px; margin: 14px 0 6px; color: #444; }
   .card {
     background: #fff; border: 1px solid #e0e0e0; border-radius: 10px;
     padding: 14px; margin-bottom: 14px;
   }
   label { display: block; font-size: 12px; color: #555; margin-bottom: 4px; }
-  input[type="text"], input[type="url"] {
+  input[type="text"], input[type="url"], input[type="tel"], input[type="email"], input[type="date"] {
     width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px;
     font-size: 14px; margin-bottom: 10px;
   }
@@ -39,6 +40,7 @@
   .actions { margin-top: 6px; display: flex; gap: 6px; }
   #status { font-size: 12px; color: #666; margin-bottom: 10px; }
   .history-item { font-size: 12px; color: #555; padding: 3px 0; }
+  .hint { font-size: 11px; color: #888; margin: -6px 0 10px; }
 </style>
 </head>
 <body>
@@ -51,9 +53,42 @@
 
   <div class="card">
     <label for="name">Название профиля</label>
-    <input type="text" id="name" placeholder="Например: apo01" />
+    <input type="text" id="name" placeholder="Например: Женя, apo01" />
+
     <label for="url">Ссылка на форму ASP</label>
     <input type="url" id="url" placeholder="https://eservicii.gov.md/asp/dimtcca/cerere/apo01" />
+
+    <h3>Данные заказчика</h3>
+    <label for="idnp">IDNP</label>
+    <input type="text" id="idnp" />
+    <label for="lastName">Фамилия</label>
+    <input type="text" id="lastName" />
+    <label for="firstName">Имя</label>
+    <input type="text" id="firstName" />
+    <label for="phone">Телефон</label>
+    <input type="tel" id="phone" placeholder="+373..." />
+    <label for="email">Электронная почта</label>
+    <input type="email" id="email" />
+
+    <h3>Мои документы</h3>
+    <label for="idDocument">Удостоверение личности / вид на жительство</label>
+    <input type="text" id="idDocument" />
+    <label for="idDocumentDate">Дата выдачи</label>
+    <input type="date" id="idDocumentDate" />
+    <label for="medicalCert">Медицинская справка</label>
+    <input type="text" id="medicalCert" />
+
+    <h3>Запрошенные услуги</h3>
+    <div class="hint">Впишите значения ТОЧНО так, как они написаны в выпадающих списках на сайте (скопируйте с самого сайта).</div>
+    <label for="service">Услуга</label>
+    <input type="text" id="service" placeholder="Запись на срочный практический экзамен" />
+    <label for="category">Категория</label>
+    <input type="text" id="category" placeholder="Категория B Механическая коробка передач" />
+    <label for="reason">Причина обращения</label>
+    <input type="text" id="reason" placeholder="Получение права на вождение" />
+    <label for="location">Пункт сдачи экзамена</label>
+    <input type="text" id="location" placeholder="DECA Chișinău (str. Salcâmilor, 28)" />
+
     <button id="addBtn" class="primary">Добавить профиль</button>
   </div>
 
@@ -66,6 +101,12 @@
   const statusEl = document.getElementById('status');
   const enableBtn = document.getElementById('enableBtn');
   const profileListEl = document.getElementById('profileList');
+
+  const FIELD_IDS = [
+    'name', 'url', 'idnp', 'lastName', 'firstName', 'phone', 'email',
+    'idDocument', 'idDocumentDate', 'medicalCert',
+    'service', 'category', 'reason', 'location',
+  ];
 
   function urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -111,20 +152,24 @@
   });
 
   document.getElementById('addBtn').addEventListener('click', async () => {
-    const name = document.getElementById('name').value.trim();
-    const url = document.getElementById('url').value.trim();
-    if (!url) return;
+    const body = {};
+    for (const id of FIELD_IDS) {
+      body[id] = document.getElementById(id).value.trim();
+    }
+    if (!body.url) return;
+
     const res = await fetch('/api/profiles', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, url }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (data.profile && window.__notifPermGranted) {
       await subscribeForProfile(data.profile.id);
     }
-    document.getElementById('name').value = '';
-    document.getElementById('url').value = '';
+    for (const id of FIELD_IDS) {
+      document.getElementById(id).value = '';
+    }
     loadProfiles();
   });
 
